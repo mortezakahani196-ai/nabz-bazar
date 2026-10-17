@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>نبض بازار | دستیار هوشمند بورس</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1220; --panel:#131e30; --panel2:#1b2940; --text:#f2f5fa; --muted:#a7b4c8; --blue:#72a7ff; --border:#293951; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:Tahoma, Arial, sans-serif; line-height:1.8; }
+    .wrap { max-width:1120px; margin:auto; padding:24px; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; gap:12px; }
+    .logo { display:grid; place-items:center; width:48px; height:48px; border-radius:14px; background:#2459a9; font-size:24px; }
+    h1 { margin:0; font-size:25px; } .sub { color:var(--muted); font-size:13px; }
+    .pill { border:1px solid #725d27; color:#ffd875; background:#352d1c; padding:4px 12px; border-radius:99px; font-size:12px; }
+    .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:16px; }
+    .card { background:var(--panel); border:1px solid var(--border); border-radius:18px; padding:20px; }
+    .stat { grid-column:span 6; } .wide { grid-column:span 8; } .side { grid-column:span 4; }
+    .section-title { display:flex; align-items:center; gap:10px; font-weight:bold; margin:0 0 10px; }
+    .big { font-size:21px; font-weight:bold; margin:8px 0 2px; }
+    .muted { color:var(--muted); font-size:13px; }
+    .item { padding:14px 0; border-top:1px solid var(--border); }
+    .item:first-of-type { border-top:0; }
+    .empty { padding:16px; background:var(--panel2); border-radius:12px; color:var(--muted); }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+    button { background:#2459a9; color:white; border:0; border-radius:10px; padding:10px 14px; font:inherit; cursor:pointer; }
+    button.secondary { background:var(--panel2); border:1px solid var(--border); }
+    footer { color:var(--muted); font-size:12px; margin-top:20px; }
+    @media(max-width:700px) { .wrap{padding:16px} .stat,.wide,.side{grid-column:span 12} h1{font-size:21px} }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo">✦</div>
+        <div>
+          <h1>نبض بازار</h1>
+          <div class="sub">دستیار هوشمند بازار سرمایه ایران</div>
+        </div>
+      </div>
+      <span class="pill">نسخه نمونه — بدون داده زنده</span>
+    </header>
+
+    <section class="grid">
+      <article class="card stat">
+        <div class="muted">وضعیت بازار</div>
+        <div class="big" id="market-status">در حال دریافت وضعیت...</div>
+        <div class="muted">اتصال منبع داده بازار هنوز انجام نشده است.</div>
+      </article>
+      <article class="card stat">
+        <div class="muted">فرصت‌های معاملاتی تأییدشده</div>
+        <div class="big">—</div>
+        <div class="muted">تا پیش از اتصال داده و آزمون مدل، سیگنال واقعی تولید نمی‌شود.</div>
+      </article>
+
+      <article class="card wide">
+        <h2 class="section-title">◉ رادار اخبار</h2>
+        <p class="muted">اخبار کدال، اقتصاد، سیاست و شرکت‌ها پس از اتصال منابع در این بخش نمایش داده خواهند شد.</p>
+        <div id="news-list" class="empty">هنوز منبع خبری متصل نشده است.</div>
+        <div class="actions">
+          <button onclick="refreshData()">به‌روزرسانی وضعیت</button>
+          <button class="secondary" onclick="showPlan()">مراحل بعدی توسعه</button>
+        </div>
+      </article>
+
+      <aside class="card side">
+        <h2 class="section-title">◈ ماژول‌ها</h2>
+        <div class="item"><strong>تحلیل خبر با AI</strong><div class="muted">در مرحله طراحی</div></div>
+        <div class="item"><strong>تحلیل نمادها</strong><div class="muted">نیازمند داده قیمت و حجم معتبر</div></div>
+        <div class="item"><strong>مدیریت ریسک</strong><div class="muted">در مرحله طراحی</div></div>
+        <div class="item"><strong>اعلان‌ها</strong><div class="muted">پس از انتخاب کانال اعلان</div></div>
+      </aside>
+    </section>
+    <footer>
+      هشدار: این یک نمونه نرم‌افزاری است و داده زنده یا توصیه خریدوفروش ارائه نمی‌کند. هر تحلیل آینده باید منبع، زمان داده و عدم‌قطعیت خود را نشان دهد.
+    </footer>
+  </main>
+  <script>
+    async function refreshData() {
+      try {
+        const response = await fetch('/api/overview');
+        const data = await response.json();
+        document.getElementById('market-status').textContent = data.market_status;
+      } catch (e) {
+        document.getElementById('market-status').textContent = 'API در دسترس نیست';
+      }
+    }
+    function showPlan() {
+      alert('گام بعدی: اتصال منبع داده معتبر، جمع‌آوری خبر، تحلیل ساخت‌یافته و ثبت معاملات فرضی.');
+    }
+    refreshData();
+  </script>
+</body>
+</html>
