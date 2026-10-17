@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO)
 app = FastAPI(
     title="نبض بازار API",
     description="دستیار هوشمند بازار سرمایه ایران",
-    version="0.6.0",
+    version="0.7.0",
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -35,44 +35,22 @@ RSS_SOURCES = {
 
 
 KEYWORDS = [
-    "بورس",
-    "سهام",
-    "شاخص کل",
-    "فرابورس",
-    "اقتصاد",
-    "بانک مرکزی",
-    "نرخ ارز",
-    "دلار",
-    "طلا",
-    "سکه",
-    "تورم",
-    "نفت",
-    "تحریم",
-    "نرخ بهره",
-    "سیاست پولی",
-    "خودرو",
-    "فولاد",
-    "پتروشیمی",
-    "عرضه اولیه",
-    "بازار سرمایه",
-    "تالار شیشه‌ای",
+    "بورس", "سهام", "شاخص کل", "فرابورس", "اقتصاد", "بانک مرکزی",
+    "نرخ ارز", "دلار", "طلا", "سکه", "تورم", "نفت", "تحریم",
+    "نرخ بهره", "سیاست پولی", "خودرو", "فولاد", "پتروشیمی",
+    "عرضه اولیه", "بازار سرمایه", "تالار شیشه‌ای",
 ]
 
 
-# کش ساده برای /api/news
-NEWS_CACHE = {
-    "at": 0.0,
-    "data": None,
-}
-NEWS_CACHE_TTL = 120  # ثانیه
-
-# محدودیت‌های دریافت منبع
+NEWS_CACHE = {"at": 0.0, "data": None}
+NEWS_CACHE_TTL = 120
 FETCH_TIMEOUT = 12
 MAX_ITEMS = 30
 SUMMARY_MAX_LEN = 500
 
 
 MOJIBAKE_MARKERS = ("Ø", "Ù", "Û", "Ã", "â€")
+PERSIAN_RE = re.compile(r"[\u0600-\u06FF]")
 ENCODING_HINTS = ("cp1256", "windows-1256", "latin-1")
 
 
@@ -90,60 +68,68 @@ def _count_markers(value: str) -> int:
     return sum(value.count(m) for m in MOJIBAKE_MARKERS)
 
 
+def has_persian(text: str) -> bool:
+    return bool(PERSIAN_RE.search(text or ""))
+
+
 def fix_text(value):
-    """اصلاح احتمالی متن فارسی که با کدگذاری اشتباه نمایش داده شده است."""
-    if not isinstance(value, str):
+    """اصلاح متن mojibake فارسی. idempotent و امن."""
+    if not isinstance(value, str) or not value:
         return value
 
-    for _ in range(2):
-        if not any(m in value for m in MOJIBAKE_MARKERS):
+    if not any(m in value for m in MOJIBAKE_MARKERS):
+        return value
+
+    current = value
+
+    for _ in range(3):
+        if not any(m in current for m in MOJIBAKE_MARKERS):
             break
 
-        repaired = None
+        candidates = []
 
-        # تلاش اول: تمام کاراکترها با cp1252
+        # تلاش ۱: cp1252 → utf-8
         try:
             raw = bytearray()
-            for char in value:
+            for char in current:
                 raw.extend(char.encode("cp1252"))
-            repaired = raw.decode("utf-8")
+            candidates.append(raw.decode("utf-8"))
         except (UnicodeEncodeError, UnicodeDecodeError):
-            repaired = None
+            pass
 
-        # تلاش دوم: کل رشته با latin-1
-        if repaired is None:
-            try:
-                repaired = value.encode("latin-1").decode("utf-8")
-            except (UnicodeEncodeError, UnicodeDecodeError):
-                repaired = None
+        # تلاش ۲: latin-1 → utf-8
+        try:
+            candidates.append(current.encode("latin-1").decode("utf-8"))
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
 
-        if repaired is None:
+        # بهترین کاندید: بیشترین کاراکتر فارسی، کمترین نشانه خرابی
+        if not candidates:
             break
 
-        # فقط اگر تعداد نشانه‌های خرابی کاهش یافته باشد، جایگزین کن
-        if _count_markers(repaired) >= _count_markers(value):
+        def score(s):
+            return (len(PERSIAN_RE.findall(s)), -_count_markers(s))
+
+        best = max(candidates, key=score)
+        best_score = score(best)
+        cur_score = score(current)
+
+        if best_score > cur_score:
+            current = best
+        else:
             break
 
-        value = repaired
+    return current
 
-    return value
-
-
-# ---------------------------------------------------------------------------
-# دیکد صحیح RSS
-# ---------------------------------------------------------------------------
 
 def decode_rss(response: requests.Response) -> str:
-    """دیکد محتوای RSS با اولویت UTF-8 و سپس استفاده از اعلان encoding داخل XML."""
     content = response.content
 
-    # 1) UTF-8 با یا بدون BOM
     try:
         return content.decode("utf-8-sig")
     except UnicodeDecodeError:
         pass
 
-    # 2) استفاده از <meta charset> یا اعلان encoding داخل XML
     head = content[:2048].decode("ascii", errors="ignore")
     match = re.search(r'encoding=["\']([\w-]+)["\']', head)
     if match:
@@ -152,7 +138,6 @@ def decode_rss(response: requests.Response) -> str:
         except LookupError:
             pass
 
-    # 3) کدگذاری‌های رایج فارسی/عربی و در آخر جایگزینی
     for enc in ENCODING_HINTS:
         try:
             return content.decode(enc)
@@ -163,32 +148,34 @@ def decode_rss(response: requests.Response) -> str:
 
 
 # ---------------------------------------------------------------------------
-# پاکسازی متن
+# پاکسازی متن — ترتیب مهم است: fix_text اول!
 # ---------------------------------------------------------------------------
 
 def strip_tags(text: str) -> str:
     return re.sub(r"<[^>]+>", " ", text)
 
 
-def clean_summary(raw: str) -> str:
-    """حذف تگ‌ها، دیکد انتیتی‌ها و اصلاح متن."""
+def clean_text(raw: str, max_len: int | None = None) -> str:
     if not raw:
         return ""
-    # ابتدا انتیتی‌ها دیکد می‌شوند، سپس تگ‌ها حذف می‌شوند
-    text = unescape(raw)
-    text = strip_tags(text)
-    text = fix_text(text)
+
+    text = fix_text(raw)          # ۱. اصلاح mojibake
+    text = unescape(text)         # ۲. دیکد انتیتی‌ها
+    text = strip_tags(text)       # ۳. حذف تگ
+    text = fix_text(text)         # ۴. احتیاط: ممکن است انتیتی‌ها mojibake بوده باشند
     text = re.sub(r"\s+", " ", text).strip()
-    return text[:SUMMARY_MAX_LEN]
+
+    if max_len is not None:
+        text = text[:max_len]
+    return text
 
 
 def clean_title(raw: str) -> str:
-    if not raw:
-        return ""
-    text = unescape(raw)
-    text = strip_tags(text)
-    text = fix_text(text)
-    return re.sub(r"\s+", " ", text).strip()
+    return clean_text(raw)
+
+
+def clean_summary(raw: str) -> str:
+    return clean_text(raw, max_len=SUMMARY_MAX_LEN)
 
 
 def matches_keywords(*texts: str) -> bool:
@@ -201,8 +188,7 @@ def matches_keywords(*texts: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def fetch_source(source: str, url: str) -> dict:
-    """دریافت و پارس یک منبع. در صورت خطا، دیکشنری خطا برمی‌گرداند."""
-    headers = {"User-Agent": "Mozilla/5.0 NabzBazar/0.6"}
+    headers = {"User-Agent": "Mozilla/5.0 NabzBazar/0.7"}
 
     try:
         response = requests.get(url, headers=headers, timeout=FETCH_TIMEOUT)
@@ -213,6 +199,7 @@ def fetch_source(source: str, url: str) -> dict:
 
         items = []
         for entry in parsed.entries:
+            # اعمال fix_text بلافاصله روی همه فیلدها
             title = clean_title(entry.get("title", ""))
             if not title:
                 continue
@@ -237,7 +224,7 @@ def fetch_source(source: str, url: str) -> dict:
 
         return {"source": source, "items": items, "error": None}
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("RSS fetch failed for %s: %r", source, exc)
         return {"source": source, "items": [], "error": repr(exc)}
 
@@ -261,10 +248,7 @@ def overview():
         "market_status": "در انتظار اتصال به داده زنده بورس",
         "confirmed_opportunities": None,
         "data_mode": "news_rss",
-        "message": (
-            "اخبار قابل دریافت است؛ قیمت زنده و تحلیل معاملاتی "
-            "هنوز متصل نیست."
-        ),
+        "message": "اخبار قابل دریافت است؛ قیمت زنده و تحلیل معاملاتی هنوز متصل نیست.",
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -273,7 +257,6 @@ def _build_news_response() -> dict:
     errors = []
     all_items = []
 
-    # دریافت هم‌زمان منابع
     with ThreadPoolExecutor(max_workers=len(RSS_SOURCES)) as pool:
         futures = [
             pool.submit(fetch_source, source, url)
@@ -286,7 +269,6 @@ def _build_news_response() -> dict:
             errors.append(result["source"])
         all_items.extend(result["items"])
 
-    # حذف تکراری‌ها بر اساس عنوان
     unique_items = []
     seen = set()
     for item in all_items:
@@ -296,12 +278,9 @@ def _build_news_response() -> dict:
         seen.add(key)
         unique_items.append(item)
 
-    # مرتب‌سازی بر اساس زمان واقعی انتشار
     unique_items.sort(key=lambda i: i.get("_ts") or (0,), reverse=True)
-
     final_items = unique_items[:MAX_ITEMS]
 
-    # حذف فیلد کمکی
     for item in final_items:
         item.pop("_ts", None)
 
